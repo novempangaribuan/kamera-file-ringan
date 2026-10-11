@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#123b32">
+<title>Kamera Ringan Otomatis</title>
+<style>
+:root{color-scheme:light;--green:#176b52;--green2:#e8f4ef;--ink:#17211d;--muted:#5c6b64;--line:#dbe5df;--bg:#f5f8f6}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);font-family:system-ui,-apple-system,sans-serif;color:var(--ink)}
+main{width:min(100%,560px);margin:0 auto;padding:16px}
+.top{padding:16px;background:var(--green);color:white;border-radius:16px;margin-bottom:14px}
+.top h1{margin:0 0 4px;font-size:1.35rem}.top p{margin:0;color:#e4f2eb;font-size:.9rem}
+.panel{background:white;border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:12px;box-shadow:0 2px 6px rgba(0,0,0,0.04)}
+.preview{width:100%;display:block;background:#111;border-radius:12px;max-height:55vh;object-fit:contain;aspect-ratio:4/3}
+.preview.hidden{display:none}
+.placeholder{aspect-ratio:4/3;background:#edf2ef;border:1px dashed #c6d4cc;border-radius:12px;display:flex;align-items:center;justify-content:center;text-align:center;padding:20px;color:var(--muted)}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}.actions.single{grid-template-columns:1fr}
+.btn{border:0;border-radius:12px;padding:12px;font:600 1rem system-ui;cursor:pointer;min-height:46px}
+.primary{background:var(--green);color:white}.secondary{background:var(--green2);color:#14553f}.outline{background:white;color:var(--ink);border:1px solid var(--line)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.status{padding:10px;border-radius:10px;background:#f0f4f1;color:var(--muted);font-size:.88rem;margin-top:10px;text-align:center}
+.status.good{background:#e8f7ee;color:#145a36}
+.status.bad{background:#fff0f0;color:#922d2d}
+</style>
+</head>
+<body>
+<main>
+  <header class="top">
+    <h1>📷 Kamera Ringan</h1>
+    <p>Buka kamera (mulai dari kamera depan), putar ke belakang bebas tanpa izin ulang, ambil foto dan langsung tersimpan otomatis di bawah 1 MB.</p>
+  </header>
+  
+  <section class="panel">
+    <video id="video" class="preview hidden" autoplay playsinline muted></video>
+    <div id="cameraPlaceholder" class="placeholder">Tekan tombol di bawah untuk menyalakan kamera.</div>
+    
+    <div class="actions single" id="boxOpen">
+      <button id="openCamera" class="btn primary">Buka Kamera</button>
+    </div>
+    
+    <div class="actions hidden" id="boxActive">
+      <button id="capture" class="btn primary">📸 Ambil & Simpan</button>
+      <button id="switchCamera" class="btn secondary">🔄 Putar Kamera</button>
+    </div>
+    
+    <div class="actions single hidden" id="boxClose">
+      <button id="stopCamera" class="btn outline">Matikan Kamera</button>
+    </div>
+
+    <div id="cameraStatus" class="status">Kamera belum aktif.</div>
+  </section>
+</main>
+
+<script>
+(() => {
+  const TARGET = 1000000; // Target < 1MB
+  const video = document.getElementById('video');
+  const cameraPlaceholder = document.getElementById('cameraPlaceholder');
+  const openCameraBtn = document.getElementById('openCamera');
+  const captureBtn = document.getElementById('capture');
+  const switchCameraBtn = document.getElementById('switchCamera');
+  const stopCameraBtn = document.getElementById('stopCamera');
+  const boxOpen = document.getElementById('boxOpen');
+  const boxActive = document.getElementById('boxActive');
+  const boxClose = document.getElementById('boxClose');
+  const cameraStatus = document.getElementById('cameraStatus');
+
+  let stream = null;
+  let useFront = true; // Default awal sesuai permintaan: kamera depan
+  let videoDevices = [];
+
+  function setStatus(text, type='') {
+    cameraStatus.textContent = text;
+    cameraStatus.className = 'status' + (type ? ' ' + type : '');
+  }
+
+  function toggleUI(active) {
+    video.classList.toggle('hidden', !active);
+    cameraPlaceholder.classList.toggle('hidden', active);
+    boxOpen.classList.toggle('hidden', active);
+    boxActive.classList.toggle('hidden', !active);
+    boxClose.classList.toggle('hidden', !active);
+  }
+
+  // Mendapatkan daftar perangkat kamera HP agar bisa diputar tanpa izin ulang
+  async function getCameraDevices() {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      videoDevices = devices.filter(d => d.kind === 'videoinput');
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  async function startCamera(isFront) {
+    try {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+      setStatus('Menyiapkan kamera...');
+
+      // Cari perangkat berdasarkan label atau facingMode ideal
+      let constraints = {
+        audio: false,
+        video: {
+          facingMode: isFront ? 'user' : 'environment',
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        }
+      };
+
+      // Jika perangkat sudah terbaca, kita bisa arahkan menggunakan deviceId spesifik jika didukung stabil
+      stream = await navigator.mediaDevices.getUserMedia(constraints);
+      video.srcObject = stream;
+      await video.play();
+      
+      useFront = isFront;
+      toggleUI(true);
+      await getCameraDevices(); // Perbarui daftar device di latar belakang
+
+      setStatus(useFront ? 'Kamera depan aktif.' : 'Kamera belakang aktif.', 'good');
+    } catch (err) {
+      setStatus('Gagal mengakses kamera. Periksa izin browser.', 'bad');
+      toggleUI(false);
+    }
+  }
+
+  async function openCamera() {
+    // Saat pertama kali dibuka, langsung aktifkan kamera depan sesuai permintaan
+    await startCamera(true);
+  }
+
+  async function switchCamera() {
+    // Memutar arah kamera tanpa meminta izin ulang (izin hanya sekali di awal)
+    const nextFront = !useFront;
+    await startCamera(nextFront);
+  }
+
+  function stopCamera() {
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+      stream = null;
+    }
+    video.srcObject = null;
+    toggleUI(false);
+    setStatus('Kamera dimatikan.');
+  }
+
+  function canvasToBlob(canvas, quality) {
+    return new Promise((resolve) => canvas.toBlob(blob => resolve(blob), 'image/jpeg', quality));
+  }
+
+  async function captureAndSave() {
+    if (!stream) return;
+    setStatus('Memproses & mengompres foto...');
+
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d', { alpha: false });
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      let width = canvas.width;
+      let height = canvas.height;
+      const maxSide = 1600;
+      if (Math.max(width, height) > maxSide) {
+        const ratio = maxSide / Math.max(width, height);
+        width = Math.round(width * ratio);
+        height = Math.round(height * ratio);
+      }
+
+      const processCanvas = document.createElement('canvas');
+      const pCtx = processCanvas.getContext('2d', { alpha: false });
+      processCanvas.width = width;
+      processCanvas.height = height;
+      pCtx.drawImage(canvas, 0, 0, width, height);
+
+      let bestBlob = null;
+      for (const q of [0.82, 0.72, 0.62, 0.52, 0.42]) {
+        bestBlob = await canvasToBlob(processCanvas, q);
+        if (bestBlob.size < TARGET) break;
+      }
+
+      // Otomatis Simpan (Auto-Download ke HP)
+      const now = new Date();
+      const pad = n => String(n).padStart(2, '0');
+      const filename = `foto-${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.jpg`;
+      
+      const url = URL.createObjectURL(bestBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+
+      setStatus(`Foto berhasil diambil & tersimpan otomatis! (${(bestBlob.size/1000).toFixed(1)} KB)`, 'good');
+    } catch (e) {
+      setStatus('Gagal mengambil foto, coba lagi.', 'bad');
+    }
+  }
+
+  openCameraBtn.addEventListener('click', openCamera);
+  switchCameraBtn.addEventListener('click', switchCamera);
+  captureBtn.addEventListener('click', captureAndSave);
+  stopCameraBtn.addEventListener('click', stopCamera);
+  window.addEventListener('pagehide', stopCamera);
+})();
+</script>
+</body>
+</html>
+
